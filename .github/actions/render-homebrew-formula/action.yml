@@ -8,6 +8,9 @@ inputs:
   sha256:
     description: SHA256 for the release archive
     required: true
+  version:
+    description: Formula version
+    required: true
   output_path:
     description: Output formula path
     required: true
@@ -21,4 +24,5 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/render_homebrew_formula.py" \
           --url "${{ inputs.archive_url }}" \
           --sha256 "${{ inputs.sha256 }}" \
+          --version "${{ inputs.version }}" \
           --output "${{ inputs.output_path }}"

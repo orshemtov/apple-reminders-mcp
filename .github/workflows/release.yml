@@ -186,6 +186,7 @@ jobs:
         with:
           archive_url: ${{ steps.release.outputs.archive_url }}
           sha256: ${{ steps.release.outputs.sha256 }}
+          version: ${{ steps.release.outputs.version }}
           output_path: homebrew-brew/Formula/apple-reminders-mcp.rb
 
       - name: Commit and push formula update

@@ -10,6 +10,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
     parser.add_argument("--sha256", required=True)
+    parser.add_argument("--version", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -18,6 +19,7 @@ def main() -> None:
   homepage "https://github.com/orshemtov/apple-reminders-mcp"
   url "{args.url}"
   sha256 "{args.sha256}"
+  version "{args.version}"
   license "MIT"
 
   depends_on :macos
