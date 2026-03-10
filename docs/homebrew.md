@@ -37,6 +37,7 @@ Homebrew will expose this repository to users as the tap name `orshemtov/brew`.
 
 When you push a tag like `v0.1.0`, `.github/workflows/release.yml` will:
 
+- install Swift 6.2 on the GitHub Actions runner
 - build the release binary on `macos-14`
 - create `apple-reminders-mcp-0.1.0-macos-arm64.tar.gz`
 - generate a matching `.sha256` file

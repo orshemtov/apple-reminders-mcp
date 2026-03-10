@@ -13,9 +13,12 @@ An MCP server for Apple Reminders on macOS, built with Swift, the official MCP S
 
 ## Features
 
-- Reminder source tools: `list_sources`, `get_default_list`
-- Reminder list tools: `list_lists`, `get_list`, `create_list`, `update_list`, `delete_list`
-- Reminder tools: `list_reminders`, `list_completed_reminders`, `list_upcoming_reminders`, `get_reminder`, `create_reminder`, `update_reminder`, `complete_reminder`, `uncomplete_reminder`, `bulk_complete_reminders`, `bulk_delete_reminders`, `bulk_move_reminders`, `delete_reminder`
+| Area | Tools |
+| --- | --- |
+| Sources | `list_sources`, `get_default_list` |
+| Lists | `list_lists`, `get_list`, `create_list`, `update_list`, `delete_list` |
+| Reminders | `list_reminders`, `list_completed_reminders`, `list_upcoming_reminders`, `get_reminder`, `create_reminder`, `update_reminder`, `complete_reminder`, `uncomplete_reminder`, `bulk_complete_reminders`, `bulk_delete_reminders`, `bulk_move_reminders`, `delete_reminder` |
+
 - Structured MCP responses for agent-friendly automation
 - macOS-native reminders access through EventKit
 
@@ -47,7 +50,7 @@ swift build
 swift run apple-reminders-mcp
 ```
 
-## Install With Homebrew
+## Homebrew
 
 Homebrew distribution will be published through the `orshemtov/brew` tap.
 
@@ -76,35 +79,3 @@ Example stdio entry:
 
 - v1 supports the reminder `url` field, plain reminder `location`, location alarms, recurrence, source metadata, and list color updates.
 - v1 does not support arbitrary file or image attachments because EventKit does not expose a clear public API for them on reminders.
-- Homebrew distribution is planned via the `orshemtov/brew` tap.
-
-## Release Flow
-
-- Tag a release like `v0.1.0` in this repository.
-- GitHub Actions builds the macOS release archive and uploads it to the GitHub Release.
-- The Homebrew tap formula should point at that archive URL and its SHA256.
-- Homebrew users install or upgrade through `brew install orshemtov/brew/apple-reminders-mcp` and `brew upgrade`.
-
-## Creating The Tap
-
-For the first release, create the tap locally and publish it to GitHub:
-
-```bash
-brew tap-new orshemtov/homebrew-brew
-gh repo create orshemtov/homebrew-brew --public --source "$(brew --repository orshemtov/homebrew-brew)" --push
-```
-
-Then add a formula file at `Formula/apple-reminders-mcp.rb` in the tap using `docs/homebrew-formula-template.rb` from this repository as the starting point.
-
-## Development
-
-- `just build` - build the package
-- `just run` - run the MCP server
-- `just test` - run the test suite
-- `just format` - format Swift sources in place
-- `just lint` - run `swift-format` in lint mode
-- `just check` - run lint and tests
-
-## CI
-
-GitHub Actions runs formatting, linting, build, and tests on macOS for pushes and pull requests.
