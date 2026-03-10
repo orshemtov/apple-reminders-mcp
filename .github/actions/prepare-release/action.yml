@@ -1,0 +1,43 @@
+name: Prepare Release
+description: Resolve release metadata and optionally bump, commit, and tag a release
+
+inputs:
+  event_name:
+    description: GitHub event name
+    required: true
+  ref_name:
+    description: Current branch or tag name
+    required: true
+  release_type:
+    description: SemVer bump when manually dispatching
+    required: false
+  build_info_path:
+    description: Path to BuildInfo.swift
+    required: true
+
+outputs:
+  tag:
+    description: Release git tag
+    value: ${{ steps.prepare.outputs.tag }}
+  version:
+    description: Release version without v prefix
+    value: ${{ steps.prepare.outputs.version }}
+  should_commit:
+    description: Whether the workflow should commit and tag a new release
+    value: ${{ steps.prepare.outputs.should_commit }}
+
+runs:
+  using: composite
+  steps:
+    - id: prepare
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m venv .release-venv
+        . .release-venv/bin/activate
+        python3 -m pip install --quiet semver
+        python3 .github/scripts/prepare_release.py \
+          --event-name "${{ inputs.event_name }}" \
+          --ref-name "${{ inputs.ref_name }}" \
+          --release-type "${{ inputs.release_type }}" \
+          --build-info "${{ inputs.build_info_path }}"

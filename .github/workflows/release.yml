@@ -4,17 +4,70 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "SemVer bump to create"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      version: ${{ steps.prepare.outputs.version }}
+      should_commit: ${{ steps.prepare.outputs.should_commit }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Prepare release metadata
+        id: prepare
+        uses: ./.github/actions/prepare-release
+        with:
+          event_name: ${{ github.event_name }}
+          ref_name: ${{ github.ref_name }}
+          release_type: ${{ inputs.release_type }}
+          build_info_path: Sources/AppleRemindersMCP/App/BuildInfo.swift
+
+      - name: Commit version bump and push tag
+        if: steps.prepare.outputs.should_commit == 'true'
+        env:
+          NEW_TAG: ${{ steps.prepare.outputs.tag }}
+          NEW_VERSION: ${{ steps.prepare.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Sources/AppleRemindersMCP/App/BuildInfo.swift
+          git commit -m "Release ${NEW_VERSION}"
+          git tag "${NEW_TAG}"
+          git push origin HEAD:${REF_NAME}
+          git push origin "${NEW_TAG}"
+
   build-release:
     runs-on: macos-15
+    needs: prepare-release
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.tag }}
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -32,7 +85,7 @@ jobs:
 
       - name: Prepare release archive
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
         run: |
           set -euo pipefail
           VERSION="${TAG_NAME#v}"
@@ -44,44 +97,82 @@ jobs:
           tar -C "$ASSET_DIR" -czf "$ASSET_DIR/$ARCHIVE_NAME" apple-reminders-mcp
           shasum -a 256 "$ASSET_DIR/$ARCHIVE_NAME" > "$ASSET_DIR/$ARCHIVE_NAME.sha256"
 
-      - name: Create GitHub release
+      - name: Generate release notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
         run: |
           set -euo pipefail
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.sha256 --clobber
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${TAG_NAME}" \
+            -f target_commitish="$(git rev-parse HEAD)" \
+            --jq .body > dist/generated-release-notes.md
+
+          cat > dist/release-notes.md <<EOF
+          ## Homebrew
+
+          Install:
+
+          ```bash
+          brew install orshemtov/brew/apple-reminders-mcp
+          ```
+
+          Upgrade:
+
+          ```bash
+          brew update
+          brew upgrade apple-reminders-mcp
+          ```
+
+          ## Release Notes
+
+          EOF
+
+          cat dist/generated-release-notes.md >> dist/release-notes.md
+
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release upload "${TAG_NAME}" dist/*.tar.gz dist/*.sha256 --clobber
+            gh release edit "${TAG_NAME}" \
+              --title "${TAG_NAME}" \
+              --notes-file dist/release-notes.md
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes "Release ${GITHUB_REF_NAME}" \
+            gh release create "${TAG_NAME}" \
+              --title "${TAG_NAME}" \
+              --notes-file dist/release-notes.md \
               dist/*.tar.gz \
               dist/*.sha256
           fi
 
   update-homebrew-tap:
     runs-on: ubuntu-latest
-    needs: build-release
+    needs: [prepare-release, build-release]
 
     steps:
-      - name: Check out this repository
-        uses: actions/checkout@v4
-
       - name: Set release variables
         id: release
+        env:
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG_NAME#v}"
           ARCHIVE_NAME="apple-reminders-mcp-${VERSION}-macos-arm64.tar.gz"
-          ARCHIVE_URL="https://github.com/orshemtov/apple-reminders-mcp/releases/download/${GITHUB_REF_NAME}/${ARCHIVE_NAME}"
+          ARCHIVE_URL="https://github.com/orshemtov/apple-reminders-mcp/releases/download/${TAG_NAME}/${ARCHIVE_NAME}"
           SHA256="$(curl -fsSL "${ARCHIVE_URL}" | shasum -a 256 | awk '{print $1}')"
 
-          {
-            echo "version=${VERSION}"
-            echo "archive_name=${ARCHIVE_NAME}"
-            echo "archive_url=${ARCHIVE_URL}"
-            echo "sha256=${SHA256}"
-          } >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "archive_url=${ARCHIVE_URL}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source repository
+        uses: actions/checkout@v4
+        with:
+          path: source-repo
 
       - name: Check out Homebrew tap
         uses: actions/checkout@v4
@@ -90,32 +181,12 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           path: homebrew-brew
 
-      - name: Update formula
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
-          ARCHIVE_URL: ${{ steps.release.outputs.archive_url }}
-          SHA256: ${{ steps.release.outputs.sha256 }}
-        run: |
-          set -euo pipefail
-          cat > homebrew-brew/Formula/apple-reminders-mcp.rb <<EOF
-          class AppleRemindersMcp < Formula
-            desc "MCP server for Apple Reminders on macOS"
-            homepage "https://github.com/orshemtov/apple-reminders-mcp"
-            url "${ARCHIVE_URL}"
-            sha256 "${SHA256}"
-            license "MIT"
-
-            depends_on :macos
-
-            def install
-              bin.install "apple-reminders-mcp"
-            end
-
-            test do
-              assert_match "Apple Reminders MCP", shell_output("#{bin}/apple-reminders-mcp --help")
-            end
-          end
-          EOF
+      - name: Render formula
+        uses: ./source-repo/.github/actions/render-homebrew-formula
+        with:
+          archive_url: ${{ steps.release.outputs.archive_url }}
+          sha256: ${{ steps.release.outputs.sha256 }}
+          output_path: homebrew-brew/Formula/apple-reminders-mcp.rb
 
       - name: Commit and push formula update
         env:

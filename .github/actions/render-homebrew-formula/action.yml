@@ -1,0 +1,24 @@
+name: Render Homebrew Formula
+description: Write the tap formula for the latest release asset
+
+inputs:
+  archive_url:
+    description: GitHub release archive URL
+    required: true
+  sha256:
+    description: SHA256 for the release archive
+    required: true
+  output_path:
+    description: Output formula path
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        python3 .github/scripts/render_homebrew_formula.py \
+          --url "${{ inputs.archive_url }}" \
+          --sha256 "${{ inputs.sha256 }}" \
+          --output "${{ inputs.output_path }}"

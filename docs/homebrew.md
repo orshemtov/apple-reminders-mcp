@@ -2,15 +2,19 @@
 
 This repository publishes release binaries from `.github/workflows/release.yml` and then updates the Homebrew tap automatically.
 
+The workflow also supports manual runs with a `patch`, `minor`, or `major` bump. In that mode a helper script updates `Sources/AppleRemindersMCP/App/BuildInfo.swift`, then the workflow commits the version bump back to `main`, creates the git tag, publishes the release, and updates the tap.
+
 ## What Happens On Each Tag
 
-When you push a tag like `v0.1.3`:
+When you push a tag like `v0.1.3` or run the workflow manually:
 
 1. GitHub Actions builds the macOS release binary.
 2. The workflow uploads `apple-reminders-mcp-<version>-macos-arm64.tar.gz` to the GitHub Release.
 3. The workflow checks out `orshemtov/homebrew-brew`.
 4. It rewrites `Formula/apple-reminders-mcp.rb` with the new release URL and SHA256.
 5. It commits and pushes the formula bump to the tap repository.
+
+For manual releases, the workflow first bumps `BuildInfo.swift`, commits that change, and creates the release tag automatically.
 
 After that, users can run:
 
