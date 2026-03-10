@@ -49,8 +49,87 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "Release ${GITHUB_REF_NAME}" \
-            dist/*.tar.gz \
-            dist/*.sha256
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.sha256 --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "Release ${GITHUB_REF_NAME}" \
+              dist/*.tar.gz \
+              dist/*.sha256
+          fi
+
+  update-homebrew-tap:
+    runs-on: ubuntu-latest
+    needs: build-release
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Set release variables
+        id: release
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE_NAME="apple-reminders-mcp-${VERSION}-macos-arm64.tar.gz"
+          ARCHIVE_URL="https://github.com/orshemtov/apple-reminders-mcp/releases/download/${GITHUB_REF_NAME}/${ARCHIVE_NAME}"
+          SHA256="$(curl -fsSL "${ARCHIVE_URL}" | shasum -a 256 | awk '{print $1}')"
+
+          {
+            echo "version=${VERSION}"
+            echo "archive_name=${ARCHIVE_NAME}"
+            echo "archive_url=${ARCHIVE_URL}"
+            echo "sha256=${SHA256}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: orshemtov/homebrew-brew
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-brew
+
+      - name: Update formula
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          ARCHIVE_URL: ${{ steps.release.outputs.archive_url }}
+          SHA256: ${{ steps.release.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          cat > homebrew-brew/Formula/apple-reminders-mcp.rb <<EOF
+          class AppleRemindersMcp < Formula
+            desc "MCP server for Apple Reminders on macOS"
+            homepage "https://github.com/orshemtov/apple-reminders-mcp"
+            url "${ARCHIVE_URL}"
+            sha256 "${SHA256}"
+            license "MIT"
+
+            depends_on :macos
+
+            def install
+              bin.install "apple-reminders-mcp"
+            end
+
+            test do
+              assert_match "Apple Reminders MCP", shell_output("#{bin}/apple-reminders-mcp --help")
+            end
+          end
+          EOF
+
+      - name: Commit and push formula update
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd homebrew-brew
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/apple-reminders-mcp.rb
+
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+
+          git commit -m "Update apple-reminders-mcp to ${VERSION}"
+          git push

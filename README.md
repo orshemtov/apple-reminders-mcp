@@ -50,6 +50,8 @@ brew upgrade apple-reminders-mcp
 
 Homebrew does not update the binary on your machine automatically in the background. New versions become available after the tap formula is updated for a release, and users then upgrade with `brew upgrade`.
 
+Maintainers can find the release and tap automation notes in `docs/homebrew.md`.
+
 ## MCP Client Setup
 
 ### Claude Code
