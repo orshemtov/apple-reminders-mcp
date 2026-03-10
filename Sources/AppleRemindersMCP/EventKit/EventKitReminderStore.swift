@@ -1,3 +1,4 @@
+import CoreGraphics
 import CoreLocation
 @preconcurrency import EventKit
 import Foundation
@@ -25,6 +26,28 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         }
     }
 
+    public func sources() async throws -> [ReminderSource] {
+        try await ensureAccess()
+        return eventStore.sources
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            .map {
+                ReminderSource(
+                    id: $0.sourceIdentifier,
+                    title: $0.title,
+                    type: Self.sourceTypeString($0.sourceType),
+                    listCount: $0.calendars(for: .reminder).count
+                )
+            }
+    }
+
+    public func defaultList() async throws -> ReminderList {
+        try await ensureAccess()
+        guard let calendar = eventStore.defaultCalendarForNewReminders() else {
+            throw ToolError.noDefaultList
+        }
+        return Self.makeReminderList(from: calendar, defaultID: calendar.calendarIdentifier)
+    }
+
     public func lists() async throws -> [ReminderList] {
         try await ensureAccess()
         let defaultID = eventStore.defaultCalendarForNewReminders()?.calendarIdentifier
@@ -48,6 +71,9 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
         calendar.title = request.title
         calendar.source = source
+        if let cgColor = Self.cgColor(from: request.colorHex) {
+            calendar.cgColor = cgColor
+        }
         do {
             try eventStore.saveCalendar(calendar, commit: true)
         } catch {
@@ -62,6 +88,17 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         try ensureWritable(calendar: calendar)
         if let title = patch.title {
             calendar.title = title
+        }
+        switch patch.colorHex {
+        case .set(let colorHex):
+            guard let cgColor = Self.cgColor(from: colorHex) else {
+                throw ToolError.invalidArguments("Invalid hex color for list color.")
+            }
+            calendar.cgColor = cgColor
+        case .clear:
+            calendar.cgColor = nil
+        case .unspecified:
+            break
         }
         do {
             try eventStore.saveCalendar(calendar, commit: true)
@@ -90,10 +127,7 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
 
     public func reminder(id: String) async throws -> Reminder {
         try await ensureAccess()
-        guard let item = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw ToolError.reminderNotFound(id)
-        }
-        return Self.makeReminder(from: item)
+        return Self.makeReminder(from: try reminderEntity(id: id))
     }
 
     public func createReminder(_ request: ReminderCreateRequest) async throws -> Reminder {
@@ -102,31 +136,19 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         reminder.calendar = try calendarForNewReminder(listID: request.listID)
         try ensureWritable(calendar: reminder.calendar)
         try applyCreateRequest(request, to: reminder)
-
-        do {
-            try eventStore.save(reminder, commit: true)
-        } catch {
-            throw ToolError.eventKit(error.localizedDescription)
-        }
+        try save(reminder: reminder)
         return Self.makeReminder(from: reminder)
     }
 
     public func updateReminder(id: String, patch: ReminderPatch) async throws -> Reminder {
         try await ensureAccess()
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw ToolError.reminderNotFound(id)
-        }
+        let reminder = try reminderEntity(id: id)
         if let listID = patch.listID {
             reminder.calendar = try reminderCalendar(id: listID)
         }
         try ensureWritable(calendar: reminder.calendar)
         try applyPatch(patch, to: reminder)
-
-        do {
-            try eventStore.save(reminder, commit: true)
-        } catch {
-            throw ToolError.eventKit(error.localizedDescription)
-        }
+        try save(reminder: reminder)
         return Self.makeReminder(from: reminder)
     }
 
@@ -142,15 +164,61 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
 
     public func deleteReminder(id: String) async throws {
         try await ensureAccess()
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw ToolError.reminderNotFound(id)
-        }
+        let reminder = try reminderEntity(id: id)
         try ensureWritable(calendar: reminder.calendar)
         do {
             try eventStore.remove(reminder, commit: true)
         } catch {
             throw ToolError.eventKit(error.localizedDescription)
         }
+    }
+
+    public func bulkCompleteReminders(ids: [String], dryRun: Bool) async throws -> [Reminder] {
+        try await ensureAccess()
+        let reminders = try ids.map(reminderEntity(id:))
+        for reminder in reminders {
+            try ensureWritable(calendar: reminder.calendar)
+            reminder.isCompleted = true
+            reminder.completionDate = Date()
+            if !dryRun {
+                try save(reminder: reminder)
+            }
+        }
+        return reminders.map(Self.makeReminder(from:))
+    }
+
+    public func bulkDeleteReminders(ids: [String], dryRun: Bool) async throws -> [Reminder] {
+        try await ensureAccess()
+        let reminders = try ids.map(reminderEntity(id:))
+        for reminder in reminders {
+            try ensureWritable(calendar: reminder.calendar)
+        }
+        let snapshots = reminders.map(Self.makeReminder(from:))
+        if !dryRun {
+            for reminder in reminders {
+                do {
+                    try eventStore.remove(reminder, commit: true)
+                } catch {
+                    throw ToolError.eventKit(error.localizedDescription)
+                }
+            }
+        }
+        return snapshots
+    }
+
+    public func bulkMoveReminders(ids: [String], targetListID: String, dryRun: Bool) async throws -> [Reminder] {
+        try await ensureAccess()
+        let targetCalendar = try reminderCalendar(id: targetListID)
+        try ensureWritable(calendar: targetCalendar)
+        let reminders = try ids.map(reminderEntity(id:))
+        for reminder in reminders {
+            try ensureWritable(calendar: reminder.calendar)
+            reminder.calendar = targetCalendar
+            if !dryRun {
+                try save(reminder: reminder)
+            }
+        }
+        return reminders.map(Self.makeReminder(from:))
     }
 
     private func calendarsForIDs(_ ids: [String]) throws -> [EKCalendar]? {
@@ -162,12 +230,19 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
 
     private func fetchReminderModels(query: ReminderQuery, calendars: [EKCalendar]?) async throws -> [Reminder] {
         let predicate: NSPredicate
-        if query.includeCompleted {
+        switch query.completionState {
+        case .all:
             predicate = eventStore.predicateForReminders(in: calendars)
-        } else {
+        case .incomplete:
             predicate = eventStore.predicateForIncompleteReminders(
                 withDueDateStarting: query.dueStarting,
                 ending: query.dueEnding,
+                calendars: calendars
+            )
+        case .completed:
+            predicate = eventStore.predicateForCompletedReminders(
+                withCompletionDateStarting: query.completedStarting,
+                ending: query.completedEnding,
                 calendars: calendars
             )
         }
@@ -176,16 +251,52 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
             _ = eventStore.fetchReminders(matching: predicate) { reminders in
                 let filtered = (reminders ?? [])
                     .filter { reminder in
-                        if !query.includeCompleted && reminder.isCompleted {
+                        switch query.completionState {
+                        case .all:
+                            break
+                        case .incomplete where reminder.isCompleted:
                             return false
+                        case .completed where reminder.isCompleted == false:
+                            return false
+                        default:
+                            break
                         }
+
                         if let search = query.search?.trimmingCharacters(in: .whitespacesAndNewlines), !search.isEmpty {
-                            let haystack = [reminder.title, reminder.notes ?? ""].joined(separator: "\n")
-                            if haystack.localizedCaseInsensitiveContains(search) == false {
+                            let haystack = [reminder.title, reminder.notes ?? "", reminder.location ?? ""]
+                                .joined(separator: "\n")
+                            if !haystack.localizedCaseInsensitiveContains(search) {
                                 return false
                             }
                         }
-                        if query.includeCompleted, let dueStarting = query.dueStarting,
+
+                        if let hasDueDate = query.hasDueDate,
+                            (reminder.dueDateComponents != nil) != hasDueDate
+                        {
+                            return false
+                        }
+
+                        if let hasLocation = query.hasLocation,
+                            ((reminder.location?.isEmpty) == false) != hasLocation
+                        {
+                            return false
+                        }
+
+                        if let hasRecurrence = query.hasRecurrence,
+                            (reminder.recurrenceRules?.isEmpty == false) != hasRecurrence
+                        {
+                            return false
+                        }
+
+                        let priority = reminder.priority == 0 ? nil : reminder.priority
+                        if let minPriority = query.priorityMin, (priority ?? 0) < minPriority {
+                            return false
+                        }
+                        if let maxPriority = query.priorityMax, (priority ?? 0) > maxPriority {
+                            return false
+                        }
+
+                        if query.completionState == .all, let dueStarting = query.dueStarting,
                             let dueDate = reminder.dueDateComponents?.date, dueDate < dueStarting
                         {
                             return false
@@ -195,6 +306,18 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
                         {
                             return false
                         }
+
+                        if query.completionState == .all, let completedStarting = query.completedStarting,
+                            let completionDate = reminder.completionDate, completionDate < completedStarting
+                        {
+                            return false
+                        }
+                        if let completedEnding = query.completedEnding,
+                            let completionDate = reminder.completionDate, completionDate > completedEnding
+                        {
+                            return false
+                        }
+
                         return true
                     }
                     .sorted { lhs, rhs in
@@ -245,6 +368,13 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         return calendar
     }
 
+    private func reminderEntity(id: String) throws -> EKReminder {
+        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw ToolError.reminderNotFound(id)
+        }
+        return reminder
+    }
+
     private func calendarForNewReminder(listID: String?) throws -> EKCalendar {
         if let listID {
             return try reminderCalendar(id: listID)
@@ -276,13 +406,22 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
     }
 
     private func ensureWritable(calendar: EKCalendar) throws {
-        guard calendar.allowsContentModifications, calendar.isImmutable == false else {
+        guard calendar.allowsContentModifications, !calendar.isImmutable else {
             throw ToolError.listNotWritable(calendar.calendarIdentifier)
+        }
+    }
+
+    private func save(reminder: EKReminder) throws {
+        do {
+            try eventStore.save(reminder, commit: true)
+        } catch {
+            throw ToolError.eventKit(error.localizedDescription)
         }
     }
 
     private func applyCreateRequest(_ request: ReminderCreateRequest, to reminder: EKReminder) throws {
         reminder.title = request.title
+        reminder.location = request.location
         reminder.notes = request.notes
         reminder.priority = request.priority ?? 0
         reminder.url = request.url
@@ -298,6 +437,11 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         if let title = patch.title {
             reminder.title = title
         }
+        if case .set(let location) = patch.location {
+            reminder.location = location
+        } else if case .clear = patch.location {
+            reminder.location = nil
+        }
         if case .set(let notes) = patch.notes {
             reminder.notes = notes
         } else if case .clear = patch.notes {
@@ -308,13 +452,13 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         } else if case .clear = patch.priority {
             reminder.priority = 0
         }
-        patch.startDate.apply { value in
-            reminder.startDateComponents = Self.dateComponents(value)
+        patch.startDate.apply {
+            reminder.startDateComponents = Self.dateComponents($0)
         } clear: {
             reminder.startDateComponents = nil
         }
-        patch.dueDate.apply { value in
-            reminder.dueDateComponents = Self.dateComponents(value)
+        patch.dueDate.apply {
+            reminder.dueDateComponents = Self.dateComponents($0)
         } clear: {
             reminder.dueDateComponents = nil
         }
@@ -328,7 +472,7 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         }
         if let isCompleted = patch.isCompleted {
             reminder.isCompleted = isCompleted
-            if isCompleted == false, case .unspecified = patch.completionDate {
+            if !isCompleted, case .unspecified = patch.completionDate {
                 reminder.completionDate = nil
             }
         }
@@ -359,17 +503,11 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
     }
 
     private func setCompletionState(forReminderID id: String, isCompleted: Bool) async throws -> Reminder {
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw ToolError.reminderNotFound(id)
-        }
+        let reminder = try reminderEntity(id: id)
         try ensureWritable(calendar: reminder.calendar)
         reminder.isCompleted = isCompleted
         reminder.completionDate = isCompleted ? Date() : nil
-        do {
-            try eventStore.save(reminder, commit: true)
-        } catch {
-            throw ToolError.eventKit(error.localizedDescription)
-        }
+        try save(reminder: reminder)
         return Self.makeReminder(from: reminder)
     }
 
@@ -393,8 +531,10 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
             externalID: reminder.calendarItemExternalIdentifier,
             listID: reminder.calendar.calendarIdentifier,
             listTitle: reminder.calendar.title,
+            sourceID: reminder.calendar.source.sourceIdentifier,
             sourceTitle: reminder.calendar.source.title,
             title: reminder.title,
+            location: reminder.location,
             notes: reminder.notes,
             priority: reminder.priority == 0 ? nil : reminder.priority,
             isCompleted: reminder.isCompleted,
@@ -403,7 +543,12 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
             dueDate: reminder.dueDateComponents.map(Self.makeReminderDate),
             url: reminder.url?.absoluteString,
             alarms: (reminder.alarms ?? []).map(Self.makeReminderAlarm),
-            recurrence: reminder.recurrenceRules?.first.map(Self.makeReminderRecurrence)
+            recurrence: reminder.recurrenceRules?.first.map(Self.makeReminderRecurrence),
+            hasAlarms: reminder.alarms?.isEmpty == false,
+            hasRecurrence: reminder.recurrenceRules?.isEmpty == false,
+            isAllDay: isAllDay(reminder: reminder),
+            creationDate: reminder.creationDate.map(DateFormatting.string),
+            lastModifiedDate: reminder.lastModifiedDate.map(DateFormatting.string)
         )
     }
 
@@ -451,7 +596,7 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         calendar.timeZone = patch.timeZoneID.flatMap(TimeZone.init(identifier:)) ?? .current
 
         var components: Set<Calendar.Component> = [.year, .month, .day]
-        if patch.allDay == false {
+        if !patch.allDay {
             components.formUnion([.hour, .minute, .second])
         }
         var dateComponents = calendar.dateComponents(components, from: patch.date)
@@ -463,6 +608,13 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
             dateComponents.second = nil
         }
         return dateComponents
+    }
+
+    private static func isAllDay(reminder: EKReminder) -> Bool {
+        guard let components = reminder.dueDateComponents ?? reminder.startDateComponents else {
+            return false
+        }
+        return components.hour == nil && components.minute == nil && components.second == nil
     }
 
     private static func makeAlarm(_ patch: ReminderAlarmPatch) throws -> EKAlarm {
@@ -610,6 +762,22 @@ public actor EventKitReminderStore: ReminderStoreProtocol {
         @unknown default:
             return "unknown"
         }
+    }
+
+    private static func cgColor(from hex: String?) -> CGColor? {
+        guard let hex else { return nil }
+        let sanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        guard sanitized.count == 6 || sanitized.count == 8, let value = UInt64(sanitized, radix: 16) else {
+            return nil
+        }
+        let redShift = sanitized.count == 8 ? 24 : 16
+        let greenShift = sanitized.count == 8 ? 16 : 8
+        let blueShift = sanitized.count == 8 ? 8 : 0
+        let alpha = sanitized.count == 8 ? CGFloat(value & 0xFF) / 255 : 1
+        let red = CGFloat((value >> redShift) & 0xFF) / 255
+        let green = CGFloat((value >> greenShift) & 0xFF) / 255
+        let blue = CGFloat((value >> blueShift) & 0xFF) / 255
+        return CGColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
 

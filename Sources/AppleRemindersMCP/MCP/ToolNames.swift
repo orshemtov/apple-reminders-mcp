@@ -1,4 +1,6 @@
 enum ToolName {
+    static let listSources = "list_sources"
+    static let getDefaultList = "get_default_list"
     static let listLists = "list_lists"
     static let getList = "get_list"
     static let createList = "create_list"
@@ -6,10 +8,15 @@ enum ToolName {
     static let deleteList = "delete_list"
 
     static let listReminders = "list_reminders"
+    static let listCompletedReminders = "list_completed_reminders"
+    static let listUpcomingReminders = "list_upcoming_reminders"
     static let getReminder = "get_reminder"
     static let createReminder = "create_reminder"
     static let updateReminder = "update_reminder"
     static let completeReminder = "complete_reminder"
     static let uncompleteReminder = "uncomplete_reminder"
+    static let bulkCompleteReminders = "bulk_complete_reminders"
+    static let bulkDeleteReminders = "bulk_delete_reminders"
+    static let bulkMoveReminders = "bulk_move_reminders"
     static let deleteReminder = "delete_reminder"
 }

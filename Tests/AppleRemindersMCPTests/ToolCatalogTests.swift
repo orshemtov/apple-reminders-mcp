@@ -9,24 +9,40 @@ struct ToolCatalogTests {
         let catalog = ToolCatalog()
         #expect(
             catalog.allTools.map(\.name) == [
+                ToolName.listSources,
+                ToolName.getDefaultList,
                 ToolName.listLists,
                 ToolName.getList,
                 ToolName.createList,
                 ToolName.updateList,
                 ToolName.deleteList,
                 ToolName.listReminders,
+                ToolName.listCompletedReminders,
+                ToolName.listUpcomingReminders,
                 ToolName.getReminder,
                 ToolName.createReminder,
                 ToolName.updateReminder,
                 ToolName.completeReminder,
                 ToolName.uncompleteReminder,
+                ToolName.bulkCompleteReminders,
+                ToolName.bulkDeleteReminders,
+                ToolName.bulkMoveReminders,
                 ToolName.deleteReminder,
             ])
     }
 
     @Test("read tools are annotated as read-only")
     func readToolsAnnotatedReadOnly() {
-        let readOnlyNames = [ToolName.listLists, ToolName.getList, ToolName.listReminders, ToolName.getReminder]
+        let readOnlyNames = [
+            ToolName.listSources,
+            ToolName.getDefaultList,
+            ToolName.listLists,
+            ToolName.getList,
+            ToolName.listReminders,
+            ToolName.listCompletedReminders,
+            ToolName.listUpcomingReminders,
+            ToolName.getReminder,
+        ]
         let catalog = ToolCatalog()
         for tool in catalog.allTools where readOnlyNames.contains(tool.name) {
             #expect(tool.annotations.readOnlyHint == true)
@@ -38,9 +54,9 @@ struct ToolCatalogTests {
     func deleteToolsAnnotatedDestructive() {
         let catalog = ToolCatalog()
         let destructive = catalog.allTools.filter {
-            $0.name == ToolName.deleteList || $0.name == ToolName.deleteReminder
+            [ToolName.deleteList, ToolName.deleteReminder, ToolName.bulkDeleteReminders].contains($0.name)
         }
-        #expect(destructive.count == 2)
+        #expect(destructive.count == 3)
         for tool in destructive {
             #expect(tool.annotations.destructiveHint == true)
         }
@@ -50,9 +66,9 @@ struct ToolCatalogTests {
     func completionToolsAreIdempotentWrites() {
         let catalog = ToolCatalog()
         let tools = catalog.allTools.filter {
-            $0.name == ToolName.completeReminder || $0.name == ToolName.uncompleteReminder
+            [ToolName.completeReminder, ToolName.uncompleteReminder, ToolName.bulkCompleteReminders].contains($0.name)
         }
-        #expect(tools.count == 2)
+        #expect(tools.count == 3)
         for tool in tools {
             #expect(tool.annotations.readOnlyHint == false)
             #expect(tool.annotations.idempotentHint == true)

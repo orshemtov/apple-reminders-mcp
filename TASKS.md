@@ -5,6 +5,11 @@
 - [x] Implement reminder list tools
 - [x] Implement reminder tools
 - [x] Add complete and uncomplete reminder tools
+- [x] Add source listing and default list tools
+- [x] Add reminder metadata fields (source id, location, created/modified timestamps)
+- [x] Add list color write support
+- [x] Add completed/upcoming reminder query tools and richer filters
+- [x] Add bulk reminder mutation tools up to roadmap phase 4
 - [x] Add tool schemas, annotations, and structured results
 - [x] Add tool and server tests
 - [x] Add concise user-facing README

@@ -38,6 +38,8 @@ struct ServerIntegrationTests {
         let (tools, _) = try await client.listTools()
         #expect(tools.map(\.name).contains(ToolName.listLists))
         #expect(tools.map(\.name).contains(ToolName.createReminder))
+        #expect(tools.map(\.name).contains(ToolName.listSources))
+        #expect(tools.map(\.name).contains(ToolName.bulkMoveReminders))
 
         let toolResult = try await client.callTool(name: ToolName.listLists, arguments: [:])
         #expect(toolResult.isError == nil)

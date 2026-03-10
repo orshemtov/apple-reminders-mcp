@@ -2,6 +2,8 @@ import Foundation
 
 public protocol ReminderStoreProtocol: Sendable {
     func ensureAccess() async throws
+    func sources() async throws -> [ReminderSource]
+    func defaultList() async throws -> ReminderList
     func lists() async throws -> [ReminderList]
     func list(id: String) async throws -> ReminderList
     func createList(_ request: ReminderListCreateRequest) async throws -> ReminderList
@@ -15,4 +17,7 @@ public protocol ReminderStoreProtocol: Sendable {
     func completeReminder(id: String) async throws -> Reminder
     func uncompleteReminder(id: String) async throws -> Reminder
     func deleteReminder(id: String) async throws
+    func bulkCompleteReminders(ids: [String], dryRun: Bool) async throws -> [Reminder]
+    func bulkDeleteReminders(ids: [String], dryRun: Bool) async throws -> [Reminder]
+    func bulkMoveReminders(ids: [String], targetListID: String, dryRun: Bool) async throws -> [Reminder]
 }

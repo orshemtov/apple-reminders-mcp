@@ -21,6 +21,10 @@ let package = Package(
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk")
             ],
+            path: "Sources/AppleRemindersMCP",
+            exclude: [
+                "Executable"
+            ],
             linkerSettings: [
                 .linkedFramework("EventKit"),
                 .linkedFramework("CoreLocation"),
@@ -30,7 +34,8 @@ let package = Package(
             name: "apple-reminders-mcp",
             dependencies: [
                 "AppleRemindersMCP"
-            ]
+            ],
+            path: "Sources/AppleRemindersMCP/Executable"
         ),
         .testTarget(
             name: "AppleRemindersMCPTests",

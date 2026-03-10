@@ -26,7 +26,7 @@ public struct AppleRemindersServer {
         )
         self.server = Server(
             name: "Apple Reminders MCP",
-            version: "0.1.0",
+            version: BuildInfo.version,
             instructions: Self.instructions,
             capabilities: .init(
                 logging: .init(),
