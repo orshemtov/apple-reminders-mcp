@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "apple_reminders": {
+      "type": "local",
+      "command": [
+        "swift",
+        "run",
+        "--package-path",
+        ".",
+        "apple-reminders-mcp"
+      ],
+      "enabled": true,
+      "timeout": 15000
+    }
+  },
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "watcher": {
+    "ignore": [
+      ".build/**"
+    ]
+  }
+}

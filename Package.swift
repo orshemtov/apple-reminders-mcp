@@ -9,22 +9,35 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "apple-reminders-mcp", targets: ["apple-reminders-mcp"])
+        .library(name: "AppleRemindersMCP", targets: ["AppleRemindersMCP"]),
+        .executable(name: "apple-reminders-mcp", targets: ["apple-reminders-mcp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0")
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
-        .executableTarget(
-            name: "apple-reminders-mcp",
+        .target(
+            name: "AppleRemindersMCP",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk")
             ],
             linkerSettings: [
-                .linkedFramework("EventKit")
+                .linkedFramework("EventKit"),
+                .linkedFramework("CoreLocation"),
             ]
-        )
+        ),
+        .executableTarget(
+            name: "apple-reminders-mcp",
+            dependencies: [
+                "AppleRemindersMCP"
+            ]
+        ),
+        .testTarget(
+            name: "AppleRemindersMCPTests",
+            dependencies: [
+                "AppleRemindersMCP",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
+        ),
     ],
 )
